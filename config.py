@@ -359,7 +359,7 @@ class System(AsDictMixin):
     # Set to True to enable API Key authentication
     api_key_enabled: bool = False
     # API_KEY is required for authentication
-    api_key: str = ''.join(secrets.choice(string.ascii_letters + string.digits) for _ in range(24))
+    api_key: str = ''.join(secrets.choice(string.ascii_letters + string.digits) for _ in range(24)) 
     # Control whether to enable the admin backend functionality. Set to False to disable the admin backend.
     is_admin_enabled: bool = True
     # Define the route for the admin backend. You can change this to your desired route

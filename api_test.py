@@ -6,16 +6,26 @@ import time
 import random
 import string
 from requests_toolbelt.multipart.encoder import MultipartEncoder
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import pandas as pd
+import time
+from openai import OpenAI
+from retrying import retry
+import base64
+
 
 absolute_path = os.path.dirname(__file__)
-base_url = "http://127.0.0.1:23456"
+base_url = "http://43.225.216.222:23456"
 
 
 # 映射表
 def voice_speakers():
     url = f"{base_url}/voice/speakers"
-
-    res = requests.post(url=url)
+    headers = {
+        "Content-Type": "application/json",
+        "X-API-KEY": "l52WyTOKMhvMyPF7n03L8NzC"
+    }
+    res = requests.post(url=url, headers=headers)
     json = res.json()
     for i in json:
         print(i)
@@ -25,7 +35,7 @@ def voice_speakers():
 
 
 # 语音合成 voice vits
-def voice_vits(text, id=0, format="wav", lang="auto", length=1, noise=0.667, noisew=0.8, segment_size=50,
+def voice_vits(text, id=7, format="wav", lang="auto", length=1, noise=0.667, noisew=0.8, segment_size=50,
                save_audio=True,
                save_path=None):
     fields = {
@@ -41,7 +51,10 @@ def voice_vits(text, id=0, format="wav", lang="auto", length=1, noise=0.667, noi
     boundary = '----VoiceConversionFormBoundary' + ''.join(random.sample(string.ascii_letters + string.digits, 16))
 
     m = MultipartEncoder(fields=fields, boundary=boundary)
-    headers = {"Content-Type": m.content_type}
+    headers = {
+        "Content-Type": m.content_type,
+        "X-API-KEY": "l52WyTOKMhvMyPF7n03L8NzC"
+    }
     url = f"{base_url}/voice/vits"
 
     res = requests.post(url=url, data=m, headers=headers)
@@ -514,47 +527,91 @@ def voice_reading(text, in_model_type, in_id, nr_model_type, nr_id, format="wav"
 
 def test_interface(text):
     error_num = 0
+    time_records = []
+
     for i in range(100):
         try:
             time.sleep(1)
             t1 = time.time()
             voice_vits(text, format="wav", lang="zh", save_audio=False)
             t2 = time.time()
-            print(f"{i}:len:{len(text)}耗时:{t2 - t1}")
+            duration = t2 - t1
+            print(f"{i}:len:{len(text)}耗时:{duration}")
+            time_records.append(duration)
         except Exception as e:
             error_num += 1
             print(e)
-    print(f"error_num={error_num}")
 
+    print(f"error_num={error_num}")
+    return time_records
+
+def process_question(question):
+    return voice_vits(question, format="wav", lang="zh", save_path = cache_path)
+
+def process_questions(input_file, output_file, num_threads):
+    results = []
+    total_answer_length = 0
+
+    with open(input_file, 'r', encoding='utf-8') as file:
+        questions = [question.strip() for question in file if question.strip()]
+
+    with ThreadPoolExecutor(max_workers=num_threads) as executor:
+        futures = {executor.submit(process_question, question): question for question in questions}
+        for future in as_completed(futures):
+            question = futures[future]
+            answer = future.result()
+            answer_length = len(answer)  # 计算answer的长度
+            total_answer_length += answer_length  # 累加answer的长度
+            results.append([question, answer, answer_length])
+
+    df = pd.DataFrame(results, columns=['Question', 'Answer', 'Answer Length'])
+
+    df.to_excel(output_file, index=False)
+
+    return total_answer_length
+
+def main(input_filename, output_filename, num_threads):
+    start_time = time.time()
+    total_answer_length = process_questions(input_filename, output_filename, num_threads)
+    end_time = time.time()
+    total_time = end_time - start_time
+    print(f"处理整个文件耗时：{total_time:.2f}秒")
+    print(f"生成的全部answer的总长度为：{total_answer_length}个字符")
 
 if __name__ == '__main__':
     cache_path = os.path.join(os.path.curdir, "cache")
+    input_filename = 'quest.txt'  # 输入文件名
+    output_filename = 'processed_quest.xlsx'  # 输出文件名
+    num_threads = 20  # 线程数
+    main(input_filename, output_filename, num_threads)
+# if __name__ == '__main__':
+#     cache_path = os.path.join(os.path.curdir, "cache")
 
-    text = "你好,こんにちは"
+    # text = "你好,こんにちは"
+    # test_interface(text)
+#     ssml = """
+#     <speak lang="zh" format="mp3" length="1.2">
+#             <voice id="0" model_type="GPT-SOVITS" preset="default">这几天心里颇不宁静。</voice>
+#             <voice id="0" model_type="Bert-VITS2">今晚在院子里坐着乘凉，忽然想起日日走过的荷塘，在这满月的光里，总该另有一番样子吧。</voice>
+#             <voice id="142">月亮渐渐地升高了，墙外马路上孩子们的欢笑，已经听不见了；</voice>
+#             <voice id="0" model_type="Bert-VITS2">妻在屋里拍着闰儿，迷迷糊糊地哼着眠歌。</voice>
+#             <voice id="120">我悄悄地披了大衫，带上门出去。</voice><break time="2s"/>
+#             <voice id="121">沿着荷塘，是一条曲折的小煤屑路。</voice>
+#             <voice id="122">这是一条幽僻的路；白天也少人走，夜晚更加寂寞。</voice>
+#             <voice id="123">荷塘四面，长着许多树，蓊蓊郁郁的。</voice>
+#             <voice id="124">路的一旁，是些杨柳，和一些不知道名字的树。</voice>
+#             <voice id="125">没有月光的晚上，这路上阴森森的，有些怕人。</voice>
+#             <voice id="126">今晚却很好，虽然月光也还是淡淡的。</voice><break time="2s"/>
+#             <voice id="127">路上只我一个人，背着手踱着。</voice>
+#             <voice id="128">这一片天地好像是我的；我也像超出了平常的自己，到了另一个世界里。</voice>
+#             <voice id="129">我爱热闹，也爱冷静；<break strength="x-weak"/>爱群居，也爱独处。</voice>
+#             <voice id="130">像今晚上，一个人在这苍茫的月下，什么都可以想，什么都可以不想，便觉是个自由的人。</voice>
+#             <voice id="131">白天里一定要做的事，一定要说的话，现在都可不理。</voice>
+#             <voice id="132">这是独处的妙处，我且受用这无边的荷香月色好了。</voice>
+#         </speak>
+#     """
 
-    ssml = """
-    <speak lang="zh" format="mp3" length="1.2">
-            <voice id="0" model_type="GPT-SOVITS" preset="default">这几天心里颇不宁静。</voice>
-            <voice id="0" model_type="Bert-VITS2">今晚在院子里坐着乘凉，忽然想起日日走过的荷塘，在这满月的光里，总该另有一番样子吧。</voice>
-            <voice id="142">月亮渐渐地升高了，墙外马路上孩子们的欢笑，已经听不见了；</voice>
-            <voice id="0" model_type="Bert-VITS2">妻在屋里拍着闰儿，迷迷糊糊地哼着眠歌。</voice>
-            <voice id="120">我悄悄地披了大衫，带上门出去。</voice><break time="2s"/>
-            <voice id="121">沿着荷塘，是一条曲折的小煤屑路。</voice>
-            <voice id="122">这是一条幽僻的路；白天也少人走，夜晚更加寂寞。</voice>
-            <voice id="123">荷塘四面，长着许多树，蓊蓊郁郁的。</voice>
-            <voice id="124">路的一旁，是些杨柳，和一些不知道名字的树。</voice>
-            <voice id="125">没有月光的晚上，这路上阴森森的，有些怕人。</voice>
-            <voice id="126">今晚却很好，虽然月光也还是淡淡的。</voice><break time="2s"/>
-            <voice id="127">路上只我一个人，背着手踱着。</voice>
-            <voice id="128">这一片天地好像是我的；我也像超出了平常的自己，到了另一个世界里。</voice>
-            <voice id="129">我爱热闹，也爱冷静；<break strength="x-weak"/>爱群居，也爱独处。</voice>
-            <voice id="130">像今晚上，一个人在这苍茫的月下，什么都可以想，什么都可以不想，便觉是个自由的人。</voice>
-            <voice id="131">白天里一定要做的事，一定要说的话，现在都可不理。</voice>
-            <voice id="132">这是独处的妙处，我且受用这无边的荷香月色好了。</voice>
-        </speak>
-    """
-
-    # path = voice_vits(text, save_path=cache_path)
+#     path = voice_vits(text, save_path=cache_path)
     # path =voice_vits_streaming(text, save_path=cache_path)
     # path = voice_w2v2_vits(text, save_path=cache_path)
     # path = voice_conversion(path, 1, 3, save_path=cache_path)
